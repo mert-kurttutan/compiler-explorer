@@ -1,0 +1,827 @@
+diff --git a/lib/app/server.ts b/lib/app/server.ts
+index 463f18311f9..c99e8ff9c81 100644
+--- a/lib/app/server.ts
++++ b/lib/app/server.ts
+@@ -29,7 +29,7 @@ import {logger} from '../logger.js';
+ import {createRenderHandlers} from './rendering.js';
+ import {setupBaseServerConfig, setupBasicRoutes, setupLoggingMiddleware} from './server-config.js';
+ import {ServerDependencies, ServerOptions, WebServerResult} from './server.interfaces.js';
+-import {setupStaticMiddleware, setupWebPackDevMiddleware} from './static-assets.js';
++import {setupStaticMiddleware, setupViteDevMiddleware} from './static-assets.js';
+ 
+ export {startListening} from './server-listening.js';
+ export {isMobileViewer} from './url-handlers.js';
+@@ -53,7 +53,7 @@ export async function setupWebServer(
+ 
+     try {
+         pugRequireHandler = await (appArgs.devMode
+-            ? setupWebPackDevMiddleware(options, router)
++            ? setupViteDevMiddleware(options, router)
+             : setupStaticMiddleware(options, router));
+     } catch (err: unknown) {
+         const error = err as Error;
+diff --git a/lib/app/static-assets.ts b/lib/app/static-assets.ts
+index 6450599810d..a5a5e9c16cf 100644
+--- a/lib/app/static-assets.ts
++++ b/lib/app/static-assets.ts
+@@ -28,7 +28,6 @@ import express from 'express';
+ import type {Router} from 'express';
+ import urljoin from 'url-join';
+ 
+-import {ElementType} from '../../shared/common-utils.js';
+ import {logger} from '../logger.js';
+ import {PugRequireHandler, ServerOptions} from './server.interfaces.js';
+ 
+@@ -55,33 +54,25 @@ export function createDefaultPugRequireHandler(
+ }
+ 
+ /**
+- * Sets up webpack dev middleware for development mode
++ * Sets up Vite dev middleware for development mode
+  * @param options - Server options
+  * @param router - Express router
+  * @returns Function to handle Pug requires
+  */
+-export async function setupWebPackDevMiddleware(options: ServerOptions, router: Router): Promise<PugRequireHandler> {
+-    logger.info('  using webpack dev middleware');
+-
+-    /* eslint-disable n/no-unpublished-import,import/extensions, */
+-    const {default: webpackDevMiddleware} = await import('webpack-dev-middleware');
+-    const {default: webpackConfig} = await import('../../webpack.config.esm.js');
+-    const {default: webpack} = await import('webpack');
+-    /* eslint-enable */
+-
+-    type WebpackConfiguration = ElementType<Parameters<typeof webpack>[0]>;
+-
+-    const webpackCompiler = webpack([webpackConfig as WebpackConfiguration]);
+-    router.use(
+-        webpackDevMiddleware(webpackCompiler, {
+-            publicPath: '/',
+-            stats: {
+-                preset: 'errors-only',
+-                timings: true,
+-            },
+-        }),
+-    );
++export async function setupViteDevMiddleware(options: ServerOptions, router: Router): Promise<PugRequireHandler> {
++    logger.info('  using vite dev middleware');
+ 
++    const {createServer} = await import('vite');
++    const {default: viteConfig} = await import('../../vite.config.js');
++    const vite = await createServer({
++        ...viteConfig,
++        server: {
++            ...viteConfig.server,
++            middlewareMode: true,
++        },
++        appType: 'custom',
++    });
++    router.use(vite.middlewares);
+     return path => urljoin(options.httpRoot, path);
+ }
+ 
+diff --git a/patches/golden-layout+1.5.9.patch b/patches/golden-layout+1.5.9.patch
+new file mode 100644
+index 00000000000..247cee8c28d
+--- /dev/null
++++ b/patches/golden-layout+1.5.9.patch
+@@ -0,0 +1,29 @@
++diff --git a/node_modules/golden-layout/dist/goldenlayout.js b/node_modules/golden-layout/dist/goldenlayout.js
++index 736f9ec..c898450 100644
++--- a/node_modules/golden-layout/dist/goldenlayout.js
+++++ b/node_modules/golden-layout/dist/goldenlayout.js
++@@ -1,3 +1,4 @@
+++var $ = require('jquery');
++ (function($){var lm={"config":{},"container":{},"controls":{},"errors":{},"items":{},"utils":{}};
++ lm.utils.F = function() {
++ };
++@@ -3703,7 +3704,11 @@ lm.items.Component = function( layoutManager, config, parent ) {
++ 
++ 	this.isComponent = true;
++ 	this.container = new lm.container.ItemContainer( this.config, this, layoutManager );
++-	this.instance = new ComponentConstructor( this.container, componentConfig );
+++    if ( ComponentConstructor.prototype === undefined ) {
+++        this.instance = ComponentConstructor( this.container, componentConfig );
+++    } else {
+++        this.instance = new ComponentConstructor( this.container, componentConfig );
+++    }
++ 	this.element = this.container._element;
++ };
++ 
++@@ -5336,4 +5341,4 @@ lm.utils.copy( lm.utils.ReactComponentHandler.prototype, {
++ 		var props = $.extend( defaultProps, this._container._config.props );
++ 		return React.createElement( this._reactClass, props );
++ 	}
++-} );})(window.$);
++\ No newline at end of file
+++} );})($);
+diff --git a/static/client.d.ts b/static/client.d.ts
+index ed2ce525627..1bb440a5422 100644
+--- a/static/client.d.ts
++++ b/static/client.d.ts
+@@ -22,17 +22,19 @@
+ // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ // POSSIBILITY OF SUCH DAMAGE.
+ 
+-// These .pug files are different from the ones on the server. Our webpack
++/// <reference types="vite/client" />
++
++// These .pug files are different from the ones on the server. Our vite plugin
+ // config will translate the .pug files into JS objects that are importable
+ // with `hash` and `text` properties.
+ //
+-// See the code in `/etc/scripts/parsed-pug/parsed_pug_file.js` for details.
++// See the code in `vite-plugin-hashed-pug` for details.
+ declare module '*.pug' {
+-    type WebpackBuiltPugFile = {
++    type VitePluginHashedPugFile = {
+         hash: string;
+         text: string;
+     };
+-    declare const content: WebpackBuiltPugFile;
++    declare const content: VitePluginHashedPugFile;
+     export default content;
+ }
+ 
+diff --git a/static/hub.ts b/static/hub.ts
+index cfd022770a7..024058a08fe 100644
+--- a/static/hub.ts
++++ b/static/hub.ts
+@@ -22,7 +22,7 @@
+ // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ // POSSIBILITY OF SUCH DAMAGE.
+ 
+-import GoldenLayout, {ContentItem} from 'golden-layout';
++import GoldenLayout from 'golden-layout';
+ type GLC = GoldenLayout.Container;
+ 
+ import _ from 'underscore';
+diff --git a/static/main.ts b/static/main.ts
+index f4f52350894..726a74aa77d 100644
+--- a/static/main.ts
++++ b/static/main.ts
+@@ -22,6 +22,15 @@
+ // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ // POSSIBILITY OF SUCH DAMAGE.
+ 
++import 'bootstrap/dist/css/bootstrap.css';
++import 'golden-layout/src/css/goldenlayout-base.css';
++import 'tom-select/dist/css/tom-select.bootstrap5.css';
++import './styles/colours.scss';
++import './styles/explorer.scss';
++
++import 'vite/modulepreload-polyfill';
++import './monaco-worker.js';
++
+ // Setup sentry before anything else so we can capture errors
+ import {SentryCapture, SetupSentry, setSentryLayout} from './sentry.js';
+ 
+@@ -76,12 +85,6 @@ import {Printerinator} from './print-view.js';
+ import {setupRealDark, takeUsersOutOfRealDark} from './real-dark.js';
+ import {formatISODate, updateAndCalcTopBarHeight} from './utils.js';
+ 
+-import 'bootstrap/dist/css/bootstrap.min.css';
+-import 'golden-layout/src/css/goldenlayout-base.css';
+-import 'tom-select/dist/css/tom-select.bootstrap5.css';
+-import './styles/colours.scss';
+-import './styles/explorer.scss';
+-
+ // Check to see if the current unload is a UI reset.
+ // Forgive me the global usage here
+ let hasUIBeenReset = false;
+diff --git a/static/monaco-worker.ts b/static/monaco-worker.ts
+new file mode 100644
+index 00000000000..5b83e919109
+--- /dev/null
++++ b/static/monaco-worker.ts
+@@ -0,0 +1,39 @@
++// Copyright (c) 2025, Compiler Explorer Authors
++// All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are met:
++//
++//     * Redistributions of source code must retain the above copyright notice,
++//       this list of conditions and the following disclaimer.
++//     * Redistributions in binary form must reproduce the above copyright
++//       notice, this list of conditions and the following disclaimer in the
++//       documentation and/or other materials provided with the distribution.
++//
++// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
++// LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++// INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++// CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++// ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++// POSSIBILITY OF SUCH DAMAGE.
++
++import * as monaco from 'monaco-editor';
++
++import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
++import TypescriptWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker';
++
++self.MonacoEnvironment = {
++    getWorker(_: unknown, label: string) {
++        if (label === 'typescript' || label === 'javascript') {
++            return new TypescriptWorker();
++        }
++        return new EditorWorker();
++    },
++};
++
++monaco.languages.typescript.typescriptDefaults.setEagerModelSync(true);
+diff --git a/static/noscript.ts b/static/noscript.ts
+index 57e6a96337c..c4a41c88ad0 100644
+--- a/static/noscript.ts
++++ b/static/noscript.ts
+@@ -22,9 +22,10 @@
+ // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ // POSSIBILITY OF SUCH DAMAGE.
+ 
+-// This jQuery import needs to be here, because noscript.ts is a different entrypoint than the rest of the code.
+-// See webpack.config.esm.ts -> entry for more details.
++import 'vite/modulepreload-polyfill';
+ import $ from 'jquery';
++Object.assign(window, {$, jQuery: $});
++
+ import '@popperjs/core';
+ import 'bootstrap';
+ 
+diff --git a/static/options.ts b/static/options.ts
+index fdef61883bb..cbf3adfcd93 100644
+--- a/static/options.ts
++++ b/static/options.ts
+@@ -38,9 +38,4 @@ for (const key in extraOptions) {
+     window.compilerExplorerOptions[key] = extraOptions[key as keyof typeof extraOptions];
+ }
+ 
+-// biome-ignore lint/style/useConst: can't use const here
+-declare let __webpack_public_path__: string;
+-
+-__webpack_public_path__ = window.staticRoot;
+-
+ export const options = window.compilerExplorerOptions;
+diff --git a/static/styles/explorer.scss b/static/styles/explorer.scss
+index 47a11e302f5..2a4dbcecbb1 100644
+--- a/static/styles/explorer.scss
++++ b/static/styles/explorer.scss
+@@ -1,4 +1,4 @@
+-@import '~@fortawesome/fontawesome-free/css/all.min.css';
++@import url('@fortawesome/fontawesome-free/css/all.min.css');
+ 
+ // SCSS function to generate TomSelect dropdown arrow SVG with custom color
+ // Based on the SVG from tom-select.bootstrap5.css line 575 in selector:
+diff --git a/static/styles/noscript.scss b/static/styles/noscript.scss
+index b035d8b505f..448802fa94f 100644
+--- a/static/styles/noscript.scss
++++ b/static/styles/noscript.scss
+@@ -1,4 +1,4 @@
+-@import '~@fortawesome/fontawesome-free/css/all.min.css';
++@import '@fortawesome/fontawesome-free/css/all.min.css';
+ 
+ html body {
+     overflow: auto;
+diff --git a/static/styles/themes/dark-theme.scss b/static/styles/themes/dark-theme.scss
+index a433bdd4657..f90f03c577b 100644
+--- a/static/styles/themes/dark-theme.scss
++++ b/static/styles/themes/dark-theme.scss
+@@ -1,4 +1,4 @@
+-@import '~golden-layout/src/css/goldenlayout-dark-theme';
++@import 'golden-layout/src/css/goldenlayout-dark-theme';
+ 
+ ::-webkit-scrollbar {
+     background: lighten(#1e1e1e, 10%);
+diff --git a/static/styles/themes/default-theme.scss b/static/styles/themes/default-theme.scss
+index c9451e16a39..b66c22cf930 100644
+--- a/static/styles/themes/default-theme.scss
++++ b/static/styles/themes/default-theme.scss
+@@ -1,4 +1,4 @@
+-@import '~golden-layout/src/css/goldenlayout-light-theme';
++@import 'golden-layout/src/css/goldenlayout-light-theme';
+ 
+ /*
+  * replace low res golden-layout icons with svg recreations to improve high DPI displays
+diff --git a/static/tests/_setup-dom.ts b/static/tests/_setup-dom.ts
+index 888d1e621f1..9f1c9bc0a05 100644
+--- a/static/tests/_setup-dom.ts
++++ b/static/tests/_setup-dom.ts
+@@ -22,5 +22,4 @@
+ // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ // POSSIBILITY OF SUCH DAMAGE.
+ 
+-globalThis.__webpack_public_path__ = '';
+ document.body.innerHTML = '<div id="config" httpRoot="/test/" staticRoot="/test/static/" extraOptions="{}"></div>';
+diff --git a/static/url.ts b/static/url.ts
+index 8b8113230f0..01ff0a18beb 100644
+--- a/static/url.ts
++++ b/static/url.ts
+@@ -23,7 +23,7 @@
+ // POSSIBILITY OF SUCH DAMAGE.
+ 
+ import GoldenLayout from 'golden-layout';
+-import lzstring from 'lz-string';
++import * as lzstring from 'lz-string';
+ import _ from 'underscore';
+ import * as Components from './components.js';
+ 
+diff --git a/tsconfig.backend.json b/tsconfig.backend.json
+index d43466611b1..2c810252052 100644
+--- a/tsconfig.backend.json
++++ b/tsconfig.backend.json
+@@ -1,8 +1,8 @@
+ {
+   "extends": "./tsconfig.base.json",
+   "files": ["app.ts", "compiler-args-app.ts"],
+-  "include": ["**/*.js", "**/*.ts"],
+-  "exclude": ["out", "test", "etc", "examples", "static", "**/*.d.ts", "cypress"],
++  "include": ["**/*.js", "**/*.ts", "vite.config.ts", "vite-plugin-hashed-pug.ts"],
++  "exclude": ["out", "dist", "test", "etc", "examples", "static", "**/*.d.ts", "cypress"],
+   "compilerOptions": {
+     /* Module resolution */
+     "target": "esnext",
+diff --git a/tsconfig.base.json b/tsconfig.base.json
+index b8bd70e3c4f..19bd8e4d4f0 100644
+--- a/tsconfig.base.json
++++ b/tsconfig.base.json
+@@ -6,6 +6,7 @@
+     "importHelpers": true,
+     /* Module resolution */
+     "esModuleInterop": true,
++    "allowSyntheticDefaultImports": true,
+     /* Other options */
+     "forceConsistentCasingInFileNames": true,
+     "skipLibCheck": true,
+diff --git a/tsconfig.frontend.json b/tsconfig.frontend.json
+index b489f9da2ae..64cbc3a7ca2 100644
+--- a/tsconfig.frontend.json
++++ b/tsconfig.frontend.json
+@@ -8,7 +8,7 @@
+     "strictPropertyInitialization": false,
+     "lib": ["dom", "es5", "dom.iterable"]
+   },
+-  "exclude": [
++    "exclude": [
+     "out",
+     "test",
+     "etc",
+@@ -17,7 +17,8 @@
+     "compiler-args-app.ts",
+     "lib",
+     "examples",
+-    "webpack.config.esm.ts",
+-    "cypress"
++    "cypress",
++    "vite.config.ts",
++    "vite-plugin-hashed-pug.ts"
+   ]
+ }
+diff --git a/views/_layout.pug b/views/_layout.pug
+index 207c08cc709..ef61356aaf2 100644
+--- a/views/_layout.pug
++++ b/views/_layout.pug
+@@ -20,8 +20,6 @@ html(lang="en")
+       | })();
+ 
+     block styles
+-        link(href=require("vendor.css") rel="stylesheet")
+-        link(href=require("main.css") rel="stylesheet")
+ 
+     //- partially apply theme as soon as possible to minimize the page load flashbang duration when using dark theme
+     script
+@@ -59,6 +57,6 @@ html(lang="en")
+     block scripts
+         script(src=`${httpRoot}client-options.js?hash=${optionsHash}`)
+         div#config(extraOptions=encodeURIComponent(compilerExplorerOptions), httpRoot=httpRoot, staticRoot=staticRoot)
+-        script(src=require("runtime.js"))
+-        script(src=require("vendor.js"))
+-        script(src=require("main.js"))
++        script(type="module" src=require("./static/main.ts"))
++        if extraBodyClass === "dev"
++            script(type="module" src="@vite/client")
+diff --git a/views/noscript/layout.pug b/views/noscript/layout.pug
+index b67bc075f19..b5e243dc56e 100644
+--- a/views/noscript/layout.pug
++++ b/views/noscript/layout.pug
+@@ -6,16 +6,13 @@ html(lang="en")
+         include ../meta.pug
+ 
+     block styles
+-        link(href=require("noscript.css") rel="stylesheet")
+-        link(href=require("vendor.css") rel="stylesheet")
+-        link(href=require("main.css") rel="stylesheet")
+         style#theme
+ 
+     block scripts
+         if mobileViewer
+-            script(src=require("vendor.js"))
+-            script(src=require("runtime.js"))
+-            script(src=require("noscript.js"))
++            script(type="module" src=require("./static/noscript.ts"))
++        if extraBodyClass === "dev"
++            script(type="module" src="@vite/client")
+ 
+   body(class=extraBodyClass)
+     block header
+diff --git a/vite-plugin-hashed-pug.ts b/vite-plugin-hashed-pug.ts
+new file mode 100644
+index 00000000000..1ede6d0ad05
+--- /dev/null
++++ b/vite-plugin-hashed-pug.ts
+@@ -0,0 +1,108 @@
++// Copyright (c) 2025, Compiler Explorer Authors
++// All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are met:
++//
++//     * Redistributions of source code must retain the above copyright notice,
++//       this list of conditions and the following disclaimer.
++//     * Redistributions in binary form must reproduce the above copyright
++//       notice, this list of conditions and the following disclaimer in the
++//       documentation and/or other materials provided with the distribution.
++//
++// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
++// LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++// INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++// CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++// ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++// POSSIBILITY OF SUCH DAMAGE.
++
++import {execSync} from 'node:child_process';
++import * as crypto from 'node:crypto';
++import * as path from 'node:path';
++import * as pug from 'pug';
++import {Plugin, createLogger} from 'vite';
++
++function getHashDigest(data: string) {
++    const hash = crypto.createHash('sha256');
++    hash.update(data);
++    return hash.digest('hex').substring(0, 16);
++}
++
++const HASHES = {
++    cookies: '08712179739d3679',
++    privacy: 'c0dad1f48a56b761',
++} as const;
++
++export type VitePluginHashedPugOptions = {
++    useGit?: boolean;
++};
++
++/**
++ * Vite plugin to handle our logic for hashed Pug templates to be built into the static assets.
++ *
++ * Some of our documents (privacy policy, cookie policy) are sensitive in the sense the user should
++ * be informed when they are changed. For this reason, we keep a hash of the pug template and
++ * notify the user when it has changed.
++ */
++export function vitePluginHashedPug({useGit}): Plugin {
++    const logger = createLogger('info', {
++        prefix: '[vite-plugin-hashed-pug]',
++    });
++    if (!useGit) {
++        logger.warn('vite-plugin-hashed-pug is configured to not use git: file contents will be wrong');
++    } else {
++        logger.info('vite-plugin-hashed-pug is using git directory to determine last commit and changes');
++    }
++    const execGit = useGit ? execGitSync : () => 'no-git-available';
++    return {
++        name: 'vite-plugin-hashed-pug',
++        async transform(src, id) {
++            if (!id.endsWith('.pug')) {
++                return null;
++            }
++            console.info('transforming pug file', id);
++            const filename = path.basename(id);
++            const lastTime = execGit(`git log -1 --format=%cd "${id}"`).trimEnd();
++            const lastCommit = execGit(`git log -1 --format=%h "${id}"`).trimEnd();
++            const gitChanges = execGit('git log --date=local --after="3 months ago" "--grep=(#[0-9]*)" --oneline')
++                .split('\n')
++                .map(line => line.match(/(?<hash>\w+) (?<description>.*)/))
++                .filter(x => x)
++                .map(match => match?.groups ?? {});
++            const pugModule = pug.compile(src, {filename: id});
++            // When calculating the hash we ignore the hard-to-predict values like lastTime and lastCommit, else every
++            // time we merge changes in policies to main we get a new hash after checking in, and that breaks the build.
++            const htmlTextForHash = pugModule({gitChanges, lastTime: 'some-last-time', lastCommit: 'some-last-commit'});
++            const hashDigest = getHashDigest(htmlTextForHash);
++            const expectedHash = HASHES[filename];
++            if (useGit && expectedHash !== undefined && expectedHash !== hashDigest) {
++                logger.warn(`Hash mismatch for ${filename}: expected ${expectedHash}, got ${hashDigest}`);
++                logger.warn('If this was expected, update the hash in `vite-plugin-hashed-pug.ts`');
++            }
++            const html = pugModule({gitChanges, lastTime, lastCommit});
++            return {
++                code: `
++                export default {
++                    hash: ${JSON.stringify(hashDigest)},
++                    text: ${JSON.stringify(html)},
++                };
++                `.trim(),
++            };
++        },
++    };
++}
++
++function execGitSync(command: string) {
++    const result = execSync(command);
++    const stdout = result.toString().trim();
++    if (stdout === '') {
++        throw new Error(`Failed to execute ${command} (empty stdout)`);
++    }
++    return stdout;
++}
+diff --git a/vite.config.ts b/vite.config.ts
+new file mode 100644
+index 00000000000..f430bde817e
+--- /dev/null
++++ b/vite.config.ts
+@@ -0,0 +1,38 @@
++import * as fss from 'node:fs';
++import * as path from 'node:path';
++import * as url from 'node:url';
++import {defineConfig} from 'vite';
++import {vitePluginHashedPug} from './vite-plugin-hashed-pug.js';
++
++const pwd = url.fileURLToPath(new URL('.', import.meta.url));
++const hasGit = fss.existsSync(path.join(pwd, '.git'));
++
++export default defineConfig({
++    plugins: [vitePluginHashedPug({useGit: hasGit})],
++    build: {
++        manifest: true,
++        rollupOptions: {
++            input: {
++                'main.js': url.fileURLToPath(new URL('./static/main.ts', import.meta.url)),
++                'noscript.js': url.fileURLToPath(new URL('./static/noscript.ts', import.meta.url)),
++            },
++        },
++        commonjsOptions: {
++            defaultIsModuleExports: true,
++            include: [
++                /golden-layout/,
++                /jquery/,
++                /clipboard/,
++                /lodash\.clonedeep/,
++                /big-integer/,
++                /events/,
++                /buffer/,
++                /file-saver/,
++                /path-browserify/,
++                /jszip/,
++                /lz-string/,
++                /monaco-vim/,
++            ],
++        },
++    },
++});
+diff --git a/vitest.config.ts b/vitest.config.ts
+index 406815c159c..446f02d069f 100644
+--- a/vitest.config.ts
++++ b/vitest.config.ts
+@@ -1,3 +1,27 @@
++// Copyright (c) 2025, Compiler Explorer Authors
++// All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are met:
++//
++//     * Redistributions of source code must retain the above copyright notice,
++//       this list of conditions and the following disclaimer.
++//     * Redistributions in binary form must reproduce the above copyright
++//       notice, this list of conditions and the following disclaimer in the
++//       documentation and/or other materials provided with the distribution.
++//
++// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
++// LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++// INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++// CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++// ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++// POSSIBILITY OF SUCH DAMAGE.
++
+ import {defineConfig} from 'vitest/config';
+ 
+ export default defineConfig({
+diff --git a/webpack.config.esm.ts b/webpack.config.esm.ts
+deleted file mode 100644
+index f0aea3f59f9..00000000000
+--- a/webpack.config.esm.ts
++++ /dev/null
+@@ -1,203 +0,0 @@
+-// Copyright (c) 2020, Compiler Explorer Authors
+-// All rights reserved.
+-//
+-// Redistribution and use in source and binary forms, with or without
+-// modification, are permitted provided that the following conditions are met:
+-//
+-//     * Redistributions of source code must retain the above copyright notice,
+-//       this list of conditions and the following disclaimer.
+-//     * Redistributions in binary form must reproduce the above copyright
+-//       notice, this list of conditions and the following disclaimer in the
+-//       documentation and/or other materials provided with the distribution.
+-//
+-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+-// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+-// LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+-// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+-// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+-// INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+-// CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+-// ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+-// POSSIBILITY OF SUCH DAMAGE.
+-
+-import fs from 'node:fs';
+-import os from 'node:os';
+-import path from 'node:path';
+-import {fileURLToPath} from 'node:url';
+-
+-import CopyWebpackPlugin from 'copy-webpack-plugin';
+-import CssMinimizerPlugin from 'css-minimizer-webpack-plugin';
+-import MiniCssExtractPlugin from 'mini-css-extract-plugin';
+-import MonacoEditorWebpackPlugin from 'monaco-editor-webpack-plugin';
+-import TerserPlugin from 'terser-webpack-plugin';
+-import Webpack from 'webpack';
+-import {WebpackManifestPlugin} from 'webpack-manifest-plugin';
+-
+-const __dirname = path.resolve(path.dirname(fileURLToPath(import.meta.url)));
+-const isDev = process.env.NODE_ENV !== 'production';
+-
+-function log(message: string) {
+-    console.log('webpack: ', message);
+-}
+-
+-log(`compiling for ${isDev ? 'development' : 'production'}.`);
+-// Memory limits us in most cases, so restrict parallelism to keep us in a sane amount of RAM
+-const parallelism = Math.floor(os.totalmem() / (4 * 1024 * 1024 * 1024)) + 1;
+-log(`Limiting parallelism to ${parallelism}`);
+-
+-const manifestPath = path.resolve(__dirname, 'out', 'dist');
+-const staticPath = path.resolve(__dirname, 'out', 'webpack', 'static');
+-const hasGit = fs.existsSync(path.resolve(__dirname, '.git'));
+-
+-// Hack alert: due to a variety of issues, sometimes we need to change
+-// the name here. Mostly it's things like webpack changes that affect
+-// how minification is done, even though that's supposed not to matter.
+-const webpackJsHack = '.v59.';
+-const plugins: Webpack.WebpackPluginInstance[] = [
+-    new MonacoEditorWebpackPlugin({
+-        languages: [
+-            'cpp',
+-            'go',
+-            'pascal',
+-            'python',
+-            'rust',
+-            'swift',
+-            'java',
+-            'julia',
+-            'kotlin',
+-            'scala',
+-            'ruby',
+-            'csharp',
+-            'fsharp',
+-            'vb',
+-            'dart',
+-            'typescript',
+-            'solidity',
+-            'scheme',
+-            'objective-c',
+-            'elixir',
+-        ],
+-        filename: isDev ? '[name].worker.js' : `[name]${webpackJsHack}worker.[contenthash].js`,
+-    }),
+-    new MiniCssExtractPlugin({
+-        filename: isDev ? '[name].css' : `[name]${webpackJsHack}[contenthash].css`,
+-    }),
+-    new WebpackManifestPlugin({
+-        fileName: path.resolve(manifestPath, 'manifest.json'),
+-        publicPath: '',
+-    }),
+-    new Webpack.DefinePlugin({
+-        'window.PRODUCTION': JSON.stringify(!isDev),
+-    }),
+-    new CopyWebpackPlugin({
+-        patterns: [{from: './public', to: staticPath}],
+-    }),
+-];
+-
+-if (isDev) {
+-    plugins.push(new Webpack.HotModuleReplacementPlugin());
+-}
+-
+-export default {
+-    mode: isDev ? 'development' : 'production',
+-    entry: {
+-        main: './static/main.ts',
+-        noscript: './static/noscript.ts',
+-    },
+-    output: {
+-        filename: isDev ? '[name].js' : `[name]${webpackJsHack}[contenthash].js`,
+-        path: staticPath,
+-    },
+-    cache: {
+-        type: 'filesystem',
+-        buildDependencies: {
+-            config: [
+-                fileURLToPath(import.meta.url),
+-                // Depend on the package.json to force a recache if something changes:
+-                // this is only because something in Monaco upsets the cache if its version changes
+-                path.resolve(__dirname, 'package.json'),
+-            ],
+-        },
+-    },
+-    resolve: {
+-        alias: {
+-            'monaco-editor$': 'monaco-editor/esm/vs/editor/editor.api',
+-        },
+-        fallback: {
+-            path: 'path-browserify',
+-        },
+-        modules: ['./static', './node_modules'],
+-        extensions: ['.ts', '.js'],
+-        extensionAlias: {
+-            '.js': ['.ts', '.js'],
+-            '.mjs': ['.mts', '.mjs'],
+-        },
+-    },
+-    stats: 'normal',
+-    devtool: 'source-map',
+-    optimization: {
+-        runtimeChunk: 'single',
+-        splitChunks: {
+-            cacheGroups: {
+-                vendors: {
+-                    test: /[/\\]node_modules[/\\]/,
+-                    name: 'vendor',
+-                    chunks: 'all',
+-                    priority: -10,
+-                },
+-            },
+-        },
+-        moduleIds: 'deterministic',
+-        minimizer: [
+-            new CssMinimizerPlugin(),
+-            new TerserPlugin({
+-                parallel: true,
+-                terserOptions: {
+-                    ecma: 5,
+-                    sourceMap: true,
+-                },
+-            }),
+-        ],
+-    },
+-    parallelism: parallelism,
+-    module: {
+-        rules: [
+-            {
+-                test: /\.s?css$/,
+-                use: [
+-                    {
+-                        loader: MiniCssExtractPlugin.loader,
+-                        options: {
+-                            publicPath: './',
+-                        },
+-                    },
+-                    'css-loader',
+-                    'sass-loader',
+-                ],
+-            },
+-            {
+-                test: /\.(png|woff|woff2|eot|ttf|svg)$/,
+-                type: 'asset',
+-                parser: {dataUrlCondition: {maxSize: 8192}},
+-            },
+-            {
+-                test: /\.pug$/,
+-                loader: './etc/scripts/parsed-pug/parsed_pug_file.js',
+-                options: {
+-                    useGit: hasGit,
+-                },
+-            },
+-            {
+-                test: /\.ts$/,
+-                loader: 'ts-loader',
+-            },
+-            {
+-                test: /\.js$/,
+-                loader: 'source-map-loader',
+-            },
+-        ],
+-    },
+-    plugins: plugins,
+-} satisfies Webpack.Configuration;

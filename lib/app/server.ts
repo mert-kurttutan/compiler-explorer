@@ -33,7 +33,7 @@ import {
     getBrandingPublicDir,
     loadStaticManifest,
     setupStaticMiddleware,
-    setupWebPackDevMiddleware,
+    setupViteDevMiddleware,
     validateBrandingAssetsInManifest,
     validateBrandingAssetsOnDisk,
 } from './static-assets.js';
@@ -61,7 +61,8 @@ export async function setupWebServer(
 
     try {
         if (appArgs.devMode) {
-            pugRequireHandler = await setupWebPackDevMiddleware(options, router);
+            // pugRequireHandler = await setupWebPackDevMiddleware(options, router);
+            pugRequireHandler = await setupViteDevMiddleware(options, router);
         } else {
             staticManifest = await loadStaticManifest(options.manifestPath);
             pugRequireHandler = setupStaticMiddleware(options, router, staticManifest);

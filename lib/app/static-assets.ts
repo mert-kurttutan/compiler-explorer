@@ -85,6 +85,59 @@ export async function setupWebPackDevMiddleware(options: ServerOptions, router: 
     return path => urljoin(options.httpRoot, path);
 }
 
+const viteDevAssetPaths: Record<string, string> = {
+    'main.js': 'main.js',
+    'noscript.js': 'noscript.js',
+    'runtime.js': 'runtime.js',
+    'vendor.js': 'vendor.js',
+    'main.css': 'main.css',
+    'noscript.css': 'noscript.css',
+    'vendor.css': 'vendor.css',
+};
+
+export function createViteDevPugRequireHandler(httpRoot: string): PugRequireHandler {
+    return requestedPath => {
+        const vitePath = viteDevAssetPaths[requestedPath];
+        if (vitePath) {
+            return urljoin(httpRoot, vitePath);
+        }
+
+        return '';
+    };
+}
+
+export async function setupViteDevMiddleware(options: ServerOptions, router: Router): Promise<PugRequireHandler> {
+    logger.info('  using vite dev middleware');
+
+    /* eslint-disable n/no-unpublished-import,import/extensions */
+    const {createServer} = await import('vite');
+    /* eslint-enable */
+
+    const viteServer = await createServer({
+        appType: 'custom',
+        configFile: resolvePathFromAppRoot('vite.config.ts'),
+        server: {
+            middlewareMode: true,
+        },
+    });
+
+    router.use(viteServer.middlewares);
+    router.get(['/main.js', '/noscript.js'], (req, res) => {
+        const entrypoint = req.path === '/noscript.js' ? '/static/noscript.ts' : '/static/main.ts';
+        res.type('application/javascript').send(
+            `globalThis.__webpack_public_path__ = '/';\nimport(${JSON.stringify(entrypoint)});\n`,
+        );
+    });
+    router.get(['/runtime.js', '/vendor.js'], (_req, res) => {
+        res.type('application/javascript').send('');
+    });
+    router.get(['/main.css', '/noscript.css', '/vendor.css'], (_req, res) => {
+        res.type('text/css').send('');
+    });
+
+    return createViteDevPugRequireHandler(options.httpRoot);
+}
+
 export async function loadStaticManifest(manifestPath: string): Promise<Record<string, string>> {
     return JSON.parse(await fs.readFile(path.join(manifestPath, 'manifest.json'), 'utf-8'));
 }

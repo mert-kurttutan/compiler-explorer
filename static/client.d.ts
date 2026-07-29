@@ -41,6 +41,13 @@ declare module '*.pug' {
 declare module '*.css';
 declare module '*.scss';
 
+declare module '*?worker' {
+    const workerConstructor: {
+        new (): Worker;
+    };
+    export default workerConstructor;
+}
+
 declare module '*.svg' {
     const src: string;
     export default src;

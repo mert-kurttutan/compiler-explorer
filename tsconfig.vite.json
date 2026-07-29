@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.backend.json",
+  "files": ["vite.config.ts", "etc/scripts/vite-manifest-adapter.ts"],
+  "include": [],
+  "exclude": []
+}

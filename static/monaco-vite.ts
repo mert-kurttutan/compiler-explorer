@@ -1,4 +1,4 @@
-// Copyright (c) 2021, Compiler Explorer Authors
+// Copyright (c) 2026, Compiler Explorer Authors
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -22,25 +22,20 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-import {unwrap} from '../shared/assert.js';
+import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker.js?worker';
+import cssWorker from 'monaco-editor/esm/vs/language/css/css.worker.js?worker';
+import htmlWorker from 'monaco-editor/esm/vs/language/html/html.worker.js?worker';
+import jsonWorker from 'monaco-editor/esm/vs/language/json/json.worker.js?worker';
+import tsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker.js?worker';
 
-const configElement = document.getElementById('config');
-if (!configElement) {
-    throw new Error('Could not find config element in DOM tree');
-}
-
-// httpRoot & staticRoot are always a string and always set.
-window.httpRoot = unwrap(configElement.getAttribute('httpRoot'));
-window.staticRoot = unwrap(configElement.getAttribute('staticRoot'));
-
-window.compilerExplorerOptions = {
-    ...JSON.parse(decodeURIComponent(configElement.getAttribute('extraOptions') ?? '%7B%7D')),
+self.MonacoEnvironment = {
+    getWorker(_workerId: string, label: string) {
+        if (label === 'json') return new jsonWorker();
+        if (label === 'css' || label === 'scss' || label === 'less') return new cssWorker();
+        if (label === 'html' || label === 'handlebars' || label === 'razor') return new htmlWorker();
+        if (label === 'typescript' || label === 'javascript') return new tsWorker();
+        return new editorWorker();
+    },
 };
 
-// // biome-ignore lint/style/useConst: can't use const here
-// declare let __webpack_public_path__: string;
-
-// __webpack_public_path__ = window.staticRoot;
-
-export const options = window.compilerExplorerOptions;
-export const optionsHash = configElement.getAttribute('optionsHash') ?? '';
+export * from 'monaco-editor/esm/vs/editor/editor.main.js';

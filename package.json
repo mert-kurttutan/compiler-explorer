@@ -128,6 +128,7 @@
     "terser-webpack-plugin": "^5.6.1",
     "ts-loader": "^9.6.2",
     "typescript": "^6.0.3",
+    "vite": "^8.1.5",
     "vitest": "^4.0.1",
     "vitest-fetch-mock": "^0.4.5",
     "webpack": "^5.108.3",
@@ -168,6 +169,10 @@
     "ts-check:tests": "tsc -p ./tsconfig.tests.json --noEmit",
     "ts-check:frontend-tests": "tsc -p ./tsconfig.frontend.tests.json --noEmit",
     "ts-check:cypress": "tsc -p ./cypress/tsconfig.json --noEmit",
+    "ts-check:vite": "tsc -p ./tsconfig.vite.json --noEmit",
+    "vite": "npm-run-all vite:build vite:manifest",
+    "vite:build": "vite build --config vite.config.ts",
+    "vite:manifest": "node --no-warnings=ExperimentalWarning --import=tsx ./etc/scripts/vite-manifest-adapter.ts",
     "webpack": "node --no-warnings=ExperimentalWarning --import=tsx ./node_modules/webpack-cli/bin/cli.js --config-node-env=production --config webpack.config.esm.ts"
   },
   "license": "BSD-2-Clause",
